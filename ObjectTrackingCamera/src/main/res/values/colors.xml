@@ -3,7 +3,8 @@
     <color name="colorPrimary">#000080</color>
     <color name="colorPrimaryDark">#228b22</color>
     <color name="colorAccent">#228b22</color>
-
+    <color name="ic_launcher_background">#FFFFFF</color>
+    <color name="logo_spkt_background">#FFFFFF</color>
     <color name="colorRecieveText">#00FF00</color>
     <color name="colorSendText">#82CAFF</color>
     <color name="colorStatusText">#FFDB58</color>

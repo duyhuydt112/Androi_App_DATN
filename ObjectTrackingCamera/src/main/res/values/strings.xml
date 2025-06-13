@@ -1,7 +1,12 @@
 <resources>
     <string name="app_name">Object Tracking Gimbal</string>
     <string name="devices">Bluetooth LE Devices</string>
-
+    <string name="ble_scan">SCAN</string>
+    <string name="ble_scan_stop">STOP</string>
+    <string name="ble_setup">Bluetooth Setup</string>
+    <string name="camera_coordinate">Show Coordinate</string>
+    <string name="tracker_type">Tracker Selection</string>
+    <string name="ble_status">BLE not connect</string>
     <string name="camera_permission_title">Camera permission required</string>
     <string name="camera_permission_message">This app uses camera only for object tracking and sent the object location to your BLE connected device, the information from your camera is not sent or collected anywhere else</string>
 
@@ -11,4 +16,6 @@
     <string name="location_denied_title">Location permission denied</string>
     <string name="location_denied_message">Because location permission has not been granted, Bluetooth LE devices cannot be scanned by this app.</string>
     <string name="pairing_request">PAIRING requested\n-> Perform pairing steps. Connect again</string>
+    <!-- TODO: Remove or change this placeholder text -->
+    <string name="hello_blank_fragment">Hello blank fragment</string>
 </resources>

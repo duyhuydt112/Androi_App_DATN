@@ -14,4 +14,8 @@
         android:id="@+id/ble_status"
         android:title="BLE not connect"
         app:showAsAction="always" />
+
+    <item
+        android:id="@+id/graph_fragment"
+        android:title="Graph Drawing..."/>
 </menu>

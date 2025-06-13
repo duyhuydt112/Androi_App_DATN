@@ -3,14 +3,15 @@
     xmlns:android="http://schemas.android.com/apk/res/android">
     <item
         android:id="@+id/ble_scan"
-        android:title="SCAN"
+        android:title="@string/ble_scan"
         app:showAsAction="always" />
     <item
         android:id="@+id/ble_scan_stop"
-        android:title="STOP"
+        android:title="@string/ble_scan_stop"
         app:showAsAction="always"
         android:visible="false" />
     <item
         android:id="@+id/bt_settings"
-        android:title="Bluetooth settings" />
+        android:title="@string/devices" />
+
 </menu>

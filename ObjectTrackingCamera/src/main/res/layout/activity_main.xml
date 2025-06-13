@@ -15,12 +15,19 @@
             android:id="@+id/toolbar"
             android:layout_width="match_parent"
             android:layout_height="?attr/actionBarSize"
-            android:background="?attr/colorPrimary" />
+            android:background="@color/logo_spkt_circle_background"
+            app:logo="@drawable/logo_spkt_circle_round" />
 
     </com.google.android.material.appbar.AppBarLayout>
 
     <RelativeLayout
         android:id="@+id/fragment"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior"/>
+
+    <FrameLayout
+        android:id="@+id/graph_fragment"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         app:layout_behavior="@string/appbar_scrolling_view_behavior"/>

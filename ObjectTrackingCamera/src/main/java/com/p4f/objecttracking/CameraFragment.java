@@ -763,7 +763,16 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
             Dialog dialog = builder.show();
 
             return true;
-        } else if (id ==R.id.tracker_type){
+        }
+        else if(id == R.id.graph_fragment){
+            Fragment graphFragment = new GraphFragment(); // Fragment bạn muốn hiển thị
+            getFragmentManager().beginTransaction()
+                    .replace(R.id.graph_fragment, graphFragment, "graph") // thay R.id.fragment bằng ID của FrameLayout chứa fragment
+                    .addToBackStack(null)
+                    .commit();
+            return true;
+        }
+        else if (id ==R.id.tracker_type){
             AlertDialog.Builder builder = new AlertDialog.Builder(getActivity());
             builder.setTitle("Tracker Selection");
 
