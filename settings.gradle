@@ -1,3 +1,4 @@
 include ':ObjectTrackingCamera'
 rootProject.name='ObjectTracking'
-include ':openCVLibrary348'
+//include ':openCVLibrary348'
+

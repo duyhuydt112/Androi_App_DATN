@@ -72,13 +72,9 @@ import org.opencv.core.MatOfByte;
 import org.opencv.core.Scalar;
 import org.opencv.imgcodecs.Imgcodecs;
 import org.opencv.imgproc.Imgproc;
-import org.opencv.tracking.Tracker;
 import org.opencv.tracking.TrackerCSRT;
 import org.opencv.tracking.TrackerKCF;
-import org.opencv.tracking.TrackerMIL;
-import org.opencv.tracking.TrackerMOSSE;
-import org.opencv.tracking.TrackerMedianFlow;
-import org.opencv.tracking.TrackerTLD;
+
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;

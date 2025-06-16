@@ -37,6 +37,7 @@ dependencies {
     testImplementation 'junit:junit:4.12'
     androidTestImplementation 'androidx.test.ext:junit:1.1.1'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.2.0'
-    implementation project(path: ':openCVLibrary348')
     implementation(name: 'MPAndroidChart-v3.1.0', ext: 'aar')
+    implementation(name: 'opencv', ext: 'aar')
+//    implementation project(path: ':openCVLibrary348')
 }
