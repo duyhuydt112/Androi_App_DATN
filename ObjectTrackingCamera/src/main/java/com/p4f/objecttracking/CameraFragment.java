@@ -200,7 +200,7 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
                 if (status == LoaderCallbackInterface.SUCCESS) {
                     Log.i(TAG, "OpenCV loaded successfully");
                     // TODO: khởi tạo các hàm xử lý ảnh OpenCV tại đây
-                    orb = ORB.create();
+                    orb = ORB.create(300);
                     matcher = DescriptorMatcher.create(DescriptorMatcher.BRUTEFORCE_HAMMING);
                 } else {
                     super.onManagerConnected(status);
