@@ -63,6 +63,8 @@ import androidx.annotation.NonNull;
 import androidx.core.app.ActivityCompat;
 import androidx.fragment.app.Fragment;
 
+import org.opencv.android.BaseLoaderCallback;
+import org.opencv.android.LoaderCallbackInterface;
 import org.opencv.android.OpenCVLoader;
 import org.opencv.android.Utils;
 import org.opencv.core.CvException;
@@ -74,6 +76,7 @@ import org.opencv.imgcodecs.Imgcodecs;
 import org.opencv.imgproc.Imgproc;
 import org.opencv.tracking.TrackerCSRT;
 import org.opencv.tracking.TrackerKCF;
+import org.opencv.video.Tracker;
 
 
 import java.nio.ByteBuffer;
@@ -117,7 +120,7 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
     private Mat mImageGrab;
     private Bitmap mBitmapGrab = null;
     private OverlayView mTrackingOverlay;
-    private org.opencv.core.Rect2d mInitRectangle = null;
+    private org.opencv.core.Rect mInitRectangle = null;
     private Point[] mPoints = new Point[2];
     private boolean mProcessing = false;
     private Drawing mDrawing = Drawing.DRAWING;
@@ -138,6 +141,7 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
     private final int REQUEST_CONNECT_CODE = 68;
     private String mBluetoothDevAddr = "";
     private String mSelectedTracker = "TrackerMedianFlow";
+    private BaseLoaderCallback mLoaderCallback;
 
 
     TextureView.SurfaceTextureListener textureListener = new TextureView.SurfaceTextureListener() {
@@ -173,6 +177,18 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setHasOptionsMenu(true);
+
+        mLoaderCallback = new BaseLoaderCallback(requireActivity()) {
+            @Override
+            public void onManagerConnected(int status) {
+                if (status == LoaderCallbackInterface.SUCCESS) {
+                    Log.i(TAG, "OpenCV loaded successfully");
+                    // TODO: khởi tạo các hàm xử lý ảnh OpenCV tại đây
+                } else {
+                    super.onManagerConnected(status);
+                }
+            }
+        };
     }
 
     @Override
@@ -185,9 +201,14 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
         } else {
             mTextureView.setSurfaceTextureListener(textureListener);
         }
-        if (!OpenCVLoader.initDebug()) {
-            Log.d(TAG, "Internal OpenCV library not found. Using OpenCV Manager for initialization");
-            OpenCVLoader.initAsync(OpenCVLoader.OPENCV_VERSION_3_4_0, getActivity(), null);
+
+        // Sử dụng initDebug (không cần initAsync nếu đã dùng AAR)
+        if (OpenCVLoader.initDebug()) {
+            Log.d(TAG, "OpenCV library loaded successfully");
+            mLoaderCallback.onManagerConnected(LoaderCallbackInterface.SUCCESS);
+        } else {
+            Log.e(TAG, "Cannot load OpenCV");
+            // Có thể hiện thông báo lỗi hoặc thoát
         }
     }
 
@@ -302,7 +323,7 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
                 ByteBuffer bb = image.getPlanes()[0].getBuffer();
                 byte[] data = new byte[bb.remaining()];
                 bb.get(data);
-                mImageGrab = Imgcodecs.imdecode(new MatOfByte(data), Imgcodecs.CV_LOAD_IMAGE_UNCHANGED);
+                mImageGrab = Imgcodecs.imdecode(new MatOfByte(data), Imgcodecs.IMREAD_UNCHANGED);
                 org.opencv.core.Core.transpose(mImageGrab, mImageGrab);
                 org.opencv.core.Core.flip(mImageGrab, mImageGrab, 1);
                 org.opencv.imgproc.Imgproc.resize(mImageGrab, mImageGrab, new org.opencv.core.Size(240,320));
@@ -333,22 +354,14 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
                 int maxX = (int)((float)Math.max(mPoints[0].x, mPoints[1].x)/mTrackingOverlay.getWidth()*mImageGrab.cols());
                 int maxY = (int)((float)Math.max(mPoints[0].y, mPoints[1].y)/mTrackingOverlay.getHeight()*mImageGrab.rows());
 
-                mInitRectangle = new org.opencv.core.Rect2d(minX, minY, maxX-minX, maxY-minY);
+                mInitRectangle = new org.opencv.core.Rect(minX, minY, maxX-minX, maxY-minY);
                 mImageGrabInit = new Mat();
                 mImageGrab.copyTo(mImageGrabInit);
 
-                if(mSelectedTracker.equals("TrackerMedianFlow")) {
-                    mTracker = TrackerMedianFlow.create();
-                }else if(mSelectedTracker.equals("TrackerCSRT")) {
+                if(mSelectedTracker.equals("TrackerCSRT")) {
                     mTracker = TrackerCSRT.create();
                 }else if(mSelectedTracker.equals("TrackerKCF")) {
                     mTracker = TrackerKCF.create();
-                }else if(mSelectedTracker.equals("TrackerMOSSE")) {
-                    mTracker = TrackerMOSSE.create();
-                }else if(mSelectedTracker.equals("TrackerTLD")) {
-                    mTracker = TrackerTLD.create();
-                }else if(mSelectedTracker.equals("TrackerMIL")) {
-                    mTracker = TrackerMIL.create();
                 }
 
                 mTracker.init(mImageGrabInit, mInitRectangle);
@@ -369,7 +382,7 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
                 }
 
             }else{
-                org.opencv.core.Rect2d trackingRectangle = new org.opencv.core.Rect2d(0, 0, 1,1);
+                org.opencv.core.Rect trackingRectangle = new org.opencv.core.Rect(0, 0, 1,1);
                 mTracker.update(mImageGrab, trackingRectangle);
 
 //                //TODO: DEBUG
@@ -407,7 +420,6 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
             }
         }else{
             if (mTracker != null) {
-                mTracker.clear();
                 mTracker = null;
             }
         }
