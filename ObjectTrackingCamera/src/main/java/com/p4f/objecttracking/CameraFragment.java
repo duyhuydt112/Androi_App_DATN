@@ -69,9 +69,15 @@ import org.opencv.android.OpenCVLoader;
 import org.opencv.android.Utils;
 import org.opencv.core.CvException;
 import org.opencv.core.CvType;
+import org.opencv.core.DMatch;
 import org.opencv.core.Mat;
 import org.opencv.core.MatOfByte;
+import org.opencv.core.MatOfDMatch;
+import org.opencv.core.MatOfKeyPoint;
+import org.opencv.core.Rect;
 import org.opencv.core.Scalar;
+import org.opencv.features2d.DescriptorMatcher;
+import org.opencv.features2d.ORB;
 import org.opencv.imgcodecs.Imgcodecs;
 import org.opencv.imgproc.Imgproc;
 import org.opencv.tracking.TrackerCSRT;
@@ -80,7 +86,9 @@ import org.opencv.video.Tracker;
 
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
@@ -126,6 +134,7 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
     private org.opencv.core.Rect mInitRectangle = null;
     private Point[] mPoints = new Point[2];
     private boolean mProcessing = false;
+    private boolean mTrackingPaused = false;
     private Drawing mDrawing = Drawing.DRAWING;
     private boolean mTargetLocked = false;
     private boolean mShowCordinate = false;
@@ -146,6 +155,10 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
     private String mSelectedTracker = "TrackerMedianFlow";
     private BaseLoaderCallback mLoaderCallback;
 
+    private ORB orb;
+    private DescriptorMatcher matcher;
+    private Mat objectDescriptors;
+    private MatOfKeyPoint objectKeypoints;
 
     TextureView.SurfaceTextureListener textureListener = new TextureView.SurfaceTextureListener() {
         @Override
@@ -187,6 +200,8 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
                 if (status == LoaderCallbackInterface.SUCCESS) {
                     Log.i(TAG, "OpenCV loaded successfully");
                     // TODO: khởi tạo các hàm xử lý ảnh OpenCV tại đây
+                    orb = ORB.create();
+                    matcher = DescriptorMatcher.create(DescriptorMatcher.BRUTEFORCE_HAMMING);
                 } else {
                     super.onManagerConnected(status);
                 }
@@ -347,85 +362,160 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
         }
     };
 
-    private void processing(){
-        //TODO:do processing
-        // Get the features for tracking
-        if(mTargetLocked) {
-            if(mDrawing==Drawing.DRAWING) {
+    private Rect adjustRectInsideImage(Rect rect, Mat image) {
+        int x = Math.max(rect.x, 0);
+        int y = Math.max(rect.y, 0);
+        int width = rect.width;
+        int height = rect.height;
+
+        // Đảm bảo không vượt quá biên phải và dưới
+        if (x + width > image.cols()) {
+            width = image.cols() - x;
+        }
+        if (y + height > image.rows()) {
+            height = image.rows() - y;
+        }
+
+        // Tránh width/height âm
+        width = Math.max(width, 1);
+        height = Math.max(height, 1);
+
+        return new Rect(x, y, width, height);
+    }
+
+
+    private void processing() {
+        if (mTargetLocked) {
+            if (mDrawing == Drawing.DRAWING) {
+                // Lấy vùng được chọn
                 int minX = (int)((float)Math.min(mPoints[0].x, mPoints[1].x)/mTrackingOverlay.getWidth()*mImageGrab.cols());
                 int minY = (int)((float)Math.min(mPoints[0].y, mPoints[1].y)/mTrackingOverlay.getHeight()*mImageGrab.rows());
                 int maxX = (int)((float)Math.max(mPoints[0].x, mPoints[1].x)/mTrackingOverlay.getWidth()*mImageGrab.cols());
                 int maxY = (int)((float)Math.max(mPoints[0].y, mPoints[1].y)/mTrackingOverlay.getHeight()*mImageGrab.rows());
 
-                mInitRectangle = new org.opencv.core.Rect(minX, minY, maxX-minX, maxY-minY);
+                mInitRectangle = new org.opencv.core.Rect(minX, minY, maxX - minX, maxY - minY);
                 mImageGrabInit = new Mat();
                 mImageGrab.copyTo(mImageGrabInit);
+                Mat grayInit = new Mat();
+                Imgproc.cvtColor(mImageGrabInit, grayInit, Imgproc.COLOR_RGBA2GRAY);
+                objectKeypoints = new MatOfKeyPoint();
+                objectDescriptors = new Mat();
+                orb.detectAndCompute(grayInit, new Mat(), objectKeypoints, objectDescriptors);
 
-                if(mSelectedTracker.equals("TrackerCSRT")) {
+                // Chọn tracker
+                if (mSelectedTracker.equals("TrackerCSRT")) {
                     mTracker = TrackerCSRT.create();
-                }else if(mSelectedTracker.equals("TrackerKCF")) {
+                } else if (mSelectedTracker.equals("TrackerKCF")) {
                     mTracker = TrackerKCF.create();
+                } else {
+                    mTracker = TrackerCSRT.create();
                 }
 
                 mTracker.init(mImageGrabInit, mInitRectangle);
                 mDrawing = Drawing.TRACKING;
 
-                //TODO: DEBUG
-                org.opencv.core.Rect testRect = new org.opencv.core.Rect(minX, minY, maxX-minX, maxY-minY);
-                Mat roi = new Mat(mImageGrab, testRect);
-                Bitmap bmp = null;
-                Mat tmp = new Mat (roi.rows(), roi.cols(), CvType.CV_8U, new Scalar(4));
-                try {
-                    Imgproc.cvtColor(roi, tmp, Imgproc.COLOR_RGB2BGRA);
-                    bmp = Bitmap.createBitmap(tmp.cols(), tmp.rows(), Bitmap.Config.ARGB_8888);
-                    Utils.matToBitmap(tmp, bmp);
+            } else {
+
+                if (mTrackingPaused) {
+                    // THỬ KHÔI PHỤC KHI ĐANG TẠM DỪNG
+                    Rect roiRect = new Rect(mInitRectangle.x, mInitRectangle.y, mInitRectangle.width, mInitRectangle.height);
+                    roiRect = adjustRectInsideImage(roiRect, mImageGrab);
+                    Mat roi = new Mat(mImageGrab, roiRect);
+                    Mat grayROI = new Mat();
+                    Imgproc.cvtColor(roi, grayROI, Imgproc.COLOR_RGBA2GRAY);
+                    MatOfKeyPoint keypointsNow = new MatOfKeyPoint();
+                    Mat descriptorsNow = new Mat();
+                    orb.detectAndCompute(grayROI, new Mat(), keypointsNow, descriptorsNow);
+
+                    if (!descriptorsNow.empty() && !objectDescriptors.empty()) {
+                        List<MatOfDMatch> knnMatches = new ArrayList<>();
+                        matcher.knnMatch(objectDescriptors, descriptorsNow, knnMatches, 2);
+
+                        float ratioThresh = 0.75f;
+                        List<DMatch> goodMatches = new ArrayList<>();
+                        for (MatOfDMatch matOfDMatch : knnMatches) {
+                            DMatch[] matches = matOfDMatch.toArray();
+                            if (matches.length >= 2 && matches[0].distance < ratioThresh * matches[1].distance) {
+                                goodMatches.add(matches[0]);
+                            }
+                        }
+
+                        if (goodMatches.size() >= 10) {
+                            Log.d("ORB_MATCH", "Tìm lại được vật thể, tiếp tục tracking");
+                            mTrackingPaused = false;
+                        } else {
+                            Log.d("ORB_MATCH", "Vẫn chưa tìm được vật thể");
+                            mProcessing = false;
+                            return;
+                        }
+                    } else {
+                        Log.d("ORB_MATCH", "Descriptors trống, chưa thể khôi phục");
+                        mProcessing = false;
+                        return;
+                    }
                 }
-                catch (CvException e){
-                    Log.d("Exception",e.getMessage());
+
+                // Tiếp tục tracking
+                org.opencv.core.Rect trackingRectangle = new org.opencv.core.Rect(0, 0, 1, 1);
+                boolean ok = mTracker.update(mImageGrab, trackingRectangle);
+                if (!ok) {
+                    Log.d("TRACKER", "Tracker mất dấu");
                 }
 
-            }else{
-                org.opencv.core.Rect trackingRectangle = new org.opencv.core.Rect(0, 0, 1,1);
-                mTracker.update(mImageGrab, trackingRectangle);
+                // ORB kiểm tra có đủ khớp không
+                Rect roiRect = new Rect(trackingRectangle.x, trackingRectangle.y, trackingRectangle.width, trackingRectangle.height);
+                roiRect = adjustRectInsideImage(roiRect, mImageGrab);
+                Mat roi = new Mat(mImageGrab, roiRect);
+                Mat grayROI = new Mat();
+                Imgproc.cvtColor(roi, grayROI, Imgproc.COLOR_RGBA2GRAY);
+                MatOfKeyPoint keypointsNow = new MatOfKeyPoint();
+                Mat descriptorsNow = new Mat();
+                orb.detectAndCompute(grayROI, new Mat(), keypointsNow, descriptorsNow);
 
-//                //TODO: DEBUG
-//                org.opencv.core.Rect testRect = new org.opencv.core.Rect((int)trackingRectangle.x,
-//                                                                        (int)trackingRectangle.y,
-//                                                                        (int)trackingRectangle.width,
-//                                                                        (int)trackingRectangle.height);
-//                Mat roi = new Mat(mImageGrab, testRect);
-//                Bitmap bmp = null;
-//                Mat tmp = new Mat (roi.rows(), roi.cols(), CvType.CV_8U, new Scalar(4));
-//                try {
-//                    Imgproc.cvtColor(roi, tmp, Imgproc.COLOR_RGB2BGRA);
-//                    bmp = Bitmap.createBitmap(tmp.cols(), tmp.rows(), Bitmap.Config.ARGB_8888);
-//                    Utils.matToBitmap(tmp, bmp);
-//                }
-//                catch (CvException e){
-//                    Log.d("Exception",e.getMessage());
-//                    mTargetLocked = false;
-//                    mDrawing = Drawing.DRAWING;
-//                }
+                if (!descriptorsNow.empty() && !objectDescriptors.empty()) {
+                    List<MatOfDMatch> knnMatches = new ArrayList<>();
+                    matcher.knnMatch(objectDescriptors, descriptorsNow, knnMatches, 2);
 
-                mPoints[0].x = (int)(trackingRectangle.x*(float)mTrackingOverlay.getWidth()/(float)mImageGrab.cols());
-                mPoints[0].y = (int)(trackingRectangle.y*(float)mTrackingOverlay.getHeight()/(float)mImageGrab.rows());
-                mPoints[1].x = mPoints[0].x+ (int)(trackingRectangle.width*(float)mTrackingOverlay.getWidth()/(float)mImageGrab.cols());
-                mPoints[1].y = mPoints[0].y +(int)(trackingRectangle.height*(float)mTrackingOverlay.getHeight()/(float)mImageGrab.rows());
+                    float ratioThresh = 0.75f;
+                    List<DMatch> goodMatches = new ArrayList<>();
+                    for (MatOfDMatch matOfDMatch : knnMatches) {
+                        DMatch[] matches = matOfDMatch.toArray();
+                        if (matches.length >= 2 && matches[0].distance < ratioThresh * matches[1].distance) {
+                            goodMatches.add(matches[0]);
+                        }
+                    }
+
+                    if (goodMatches.size() < 10) {
+                        Log.d("ORB_MATCH", "Tạm mất dấu, sẽ thử lại ở frame tiếp theo");
+                        mTrackingPaused = true;
+                        mProcessing = false;
+                        return;
+                    }
+                }
+
+                // Cập nhật bounding box vào overlay
+                mPoints[0].x = (int)(trackingRectangle.x * (float)mTrackingOverlay.getWidth() / (float)mImageGrab.cols());
+                mPoints[0].y = (int)(trackingRectangle.y * (float)mTrackingOverlay.getHeight() / (float)mImageGrab.rows());
+                mPoints[1].x = mPoints[0].x + (int)(trackingRectangle.width * (float)mTrackingOverlay.getWidth() / (float)mImageGrab.cols());
+                mPoints[1].y = mPoints[0].y + (int)(trackingRectangle.height * (float)mTrackingOverlay.getHeight() / (float)mImageGrab.rows());
 
                 mTrackingOverlay.postInvalidate();
-                if(connected == Connected.True) {
+
+                // Gửi BLE nếu đang kết nối
+                if (connected == Connected.True) {
                     String dataBle = Integer.toString((mPoints[0].x + mPoints[1].x) / 2) + "," +
-                                     Integer.toString(mTrackingOverlay.getWidth()) + "," +
-                                     Integer.toString((mPoints[0].y + mPoints[1].y) / 2) + "," +
-                                     Integer.toString(mTrackingOverlay.getHeight());
+                            Integer.toString(mTrackingOverlay.getWidth()) + "," +
+                            Integer.toString((mPoints[0].y + mPoints[1].y) / 2) + "," +
+                            Integer.toString(mTrackingOverlay.getHeight());
                     sendBLE(dataBle);
                 }
             }
-        }else{
+        } else {
             if (mTracker != null) {
                 mTracker = null;
             }
         }
+
         mProcessing = false;
     }
 
@@ -788,12 +878,8 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
             builder.setTitle("Tracker Selection");
 
             final String[] radioBtnNames = {
-                    "TrackerMedianFlow",
                     "TrackerCSRT",
                     "TrackerKCF",
-                    "TrackerMOSSE",
-                    "TrackerTLD",
-                    "TrackerMIL",
             };
 
             final RadioButton[] rb = new RadioButton[radioBtnNames.length];
