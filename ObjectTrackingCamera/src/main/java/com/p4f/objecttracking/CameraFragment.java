@@ -86,6 +86,9 @@ import java.util.concurrent.TimeUnit;
 
 public class CameraFragment extends Fragment implements ServiceConnection, SerialListener {
 
+    static {
+        System.loadLibrary("opencv_java4"); // <-- Thêm dòng này
+    }
     final String TAG = "CameraFragment";
 
     private TextureView mTextureView;
