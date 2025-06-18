@@ -159,6 +159,10 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
     private DescriptorMatcher matcher;
     private Mat objectDescriptors;
     private MatOfKeyPoint objectKeypoints;
+    private int roiSize = 70;
+
+    private Mat latestDescriptors = new Mat();
+    private Mat latestKeypoints = new MatOfKeyPoint();
 
     TextureView.SurfaceTextureListener textureListener = new TextureView.SurfaceTextureListener() {
         @Override
@@ -200,7 +204,7 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
                 if (status == LoaderCallbackInterface.SUCCESS) {
                     Log.i(TAG, "OpenCV loaded successfully");
                     // TODO: khởi tạo các hàm xử lý ảnh OpenCV tại đây
-                    orb = ORB.create(300);
+                    orb = ORB.create();
                     matcher = DescriptorMatcher.create(DescriptorMatcher.BRUTEFORCE_HAMMING);
                 } else {
                     super.onManagerConnected(status);
@@ -418,7 +422,10 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
 
                 if (mTrackingPaused) {
                     // THỬ KHÔI PHỤC KHI ĐANG TẠM DỪNG
-                    Rect roiRect = new Rect(mInitRectangle.x, mInitRectangle.y, mInitRectangle.width, mInitRectangle.height);
+                    int centerX = mInitRectangle.x + mInitRectangle.width / 2;
+                    int centerY = mInitRectangle.y + mInitRectangle.height / 2;
+
+                    Rect roiRect = new Rect(centerX - roiSize / 2, centerY - roiSize / 2, roiSize, roiSize);
                     roiRect = adjustRectInsideImage(roiRect, mImageGrab);
                     Mat roi = new Mat(mImageGrab, roiRect);
                     Mat grayROI = new Mat();
@@ -442,7 +449,10 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
 
                         if (goodMatches.size() >= 10) {
                             Log.d("ORB_MATCH", "Tìm lại được vật thể, tiếp tục tracking");
+                            latestDescriptors = descriptorsNow.clone();
+                            latestKeypoints = keypointsNow.clone();
                             mTrackingPaused = false;
+
                         } else {
                             Log.d("ORB_MATCH", "Vẫn chưa tìm được vật thể");
                             mProcessing = false;
@@ -463,7 +473,10 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
                 }
 
                 // ORB kiểm tra có đủ khớp không
-                Rect roiRect = new Rect(trackingRectangle.x, trackingRectangle.y, trackingRectangle.width, trackingRectangle.height);
+                int centerX = trackingRectangle.x + trackingRectangle.width / 2;
+                int centerY = trackingRectangle.y + trackingRectangle.height / 2;
+
+                Rect roiRect = new Rect(centerX - roiSize / 2, centerY - roiSize / 2, roiSize, roiSize);
                 roiRect = adjustRectInsideImage(roiRect, mImageGrab);
                 Mat roi = new Mat(mImageGrab, roiRect);
                 Mat grayROI = new Mat();
@@ -485,7 +498,7 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
                         }
                     }
 
-                    if (goodMatches.size() < 10) {
+                    if (goodMatches.size() < 5) {
                         Log.d("ORB_MATCH", "Tạm mất dấu, sẽ thử lại ở frame tiếp theo");
                         mTrackingPaused = true;
                         mProcessing = false;
