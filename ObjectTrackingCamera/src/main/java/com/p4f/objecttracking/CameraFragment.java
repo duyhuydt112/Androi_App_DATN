@@ -67,12 +67,15 @@ import org.opencv.android.BaseLoaderCallback;
 import org.opencv.android.LoaderCallbackInterface;
 import org.opencv.android.OpenCVLoader;
 import org.opencv.android.Utils;
+import org.opencv.core.Core;
 import org.opencv.core.CvException;
 import org.opencv.core.CvType;
 import org.opencv.core.DMatch;
 import org.opencv.core.Mat;
 import org.opencv.core.MatOfByte;
 import org.opencv.core.MatOfDMatch;
+import org.opencv.core.MatOfFloat;
+import org.opencv.core.MatOfInt;
 import org.opencv.core.MatOfKeyPoint;
 import org.opencv.core.Rect;
 import org.opencv.core.Scalar;
@@ -163,6 +166,9 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
 
     private Mat latestDescriptors = new Mat();
     private Mat latestKeypoints = new MatOfKeyPoint();
+
+    private Mat objectHistHue;
+
 
     TextureView.SurfaceTextureListener textureListener = new TextureView.SurfaceTextureListener() {
         @Override
@@ -405,7 +411,14 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
                 objectKeypoints = new MatOfKeyPoint();
                 objectDescriptors = new Mat();
                 orb.detectAndCompute(grayInit, new Mat(), objectKeypoints, objectDescriptors);
-
+                Mat objectHSV = new Mat();
+                Imgproc.cvtColor(mImageGrabInit, objectHSV, Imgproc.COLOR_RGB2HSV);
+                List<Mat> objectChannels = new ArrayList<>();
+                Core.split(objectHSV, objectChannels);
+                objectHistHue = new Mat(); // <- cần khai báo biến toàn cục
+                Imgproc.calcHist(Arrays.asList(objectChannels.get(0)), new MatOfInt(0), new Mat(),
+                        objectHistHue, new MatOfInt(50), new MatOfFloat(0, 180));
+                Core.normalize(objectHistHue, objectHistHue, 0, 1, Core.NORM_MINMAX);
                 // Chọn tracker
                 if (mSelectedTracker.equals("TrackerCSRT")) {
                     mTracker = TrackerCSRT.create();
@@ -448,6 +461,22 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
                         }
 
                         if (goodMatches.size() >= 10) {
+                            Log.d("ORB_MATCH", "Tìm lại được vật thể, xac minh vat");
+                            Mat roiHSV = new Mat();
+                            Imgproc.cvtColor(roi, roiHSV, Imgproc.COLOR_RGB2HSV);
+                            List<Mat> roiChannels = new ArrayList<>();
+                            Core.split(roiHSV, roiChannels);
+                            Mat roiHistHue = new Mat();
+                            Imgproc.calcHist(Arrays.asList(roiChannels.get(0)), new MatOfInt(0), new Mat(),
+                                    roiHistHue, new MatOfInt(50), new MatOfFloat(0, 180));
+                            Core.normalize(roiHistHue, roiHistHue, 0, 1, Core.NORM_MINMAX);
+
+                            double histCompare = Imgproc.compareHist(objectHistHue, roiHistHue, Imgproc.CV_COMP_CORREL);
+                            if (histCompare < 0.35) {
+                                Log.d("HISTOGRAM", "Histogram khác biệt quá nhiều, từ chối khôi phục");
+                                mProcessing = false;
+                                return;
+                            }
                             Log.d("ORB_MATCH", "Tìm lại được vật thể, tiếp tục tracking");
                             latestDescriptors = descriptorsNow.clone();
                             latestKeypoints = keypointsNow.clone();
