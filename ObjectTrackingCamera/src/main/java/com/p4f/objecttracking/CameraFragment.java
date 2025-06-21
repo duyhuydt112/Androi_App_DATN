@@ -390,9 +390,6 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
         return adjustRectInsideImage(expanded, new Mat(imageHeight, imageWidth, CvType.CV_8UC1));  // an image Mat just for bounds
     }
 
-
-
-
     private Rect adjustRectInsideImage(Rect rect, Mat image) {
         int x = Math.max(rect.x, 0);
         int y = Math.max(rect.y, 0);
@@ -434,6 +431,25 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
         int cy = (mPoints[0].y + mPoints[1].y) / 2;
         return cx + "," + mTrackingOverlay.getWidth() + "," + cy + "," + mTrackingOverlay.getHeight();
     }
+
+    private boolean verifyHistogram(Rect rect) {
+        Rect safeRect = adjustRectInsideImage(rect, mImageGrab);  // Thêm dòng này
+
+        Mat roi = new Mat(mImageGrab, safeRect);  // Dùng rect đã an toàn
+        Mat roiHSV = new Mat();
+        Imgproc.cvtColor(roi, roiHSV, Imgproc.COLOR_RGB2HSV);
+
+        List<Mat> roiChannels = new ArrayList<>();
+        Core.split(roiHSV, roiChannels);
+        Mat roiHistHue = new Mat();
+        Imgproc.calcHist(Arrays.asList(roiChannels.get(0)), new MatOfInt(0), new Mat(),
+                roiHistHue, new MatOfInt(50), new MatOfFloat(0, 180));
+        Core.normalize(roiHistHue, roiHistHue, 0, 1, Core.NORM_MINMAX);
+
+        double histCompare = Imgproc.compareHist(objectHistHue, roiHistHue, Imgproc.CV_COMP_CORREL);
+        return histCompare >= 0.3;
+    }
+
 
     private void processing() {
         frameCount++;
@@ -548,12 +564,14 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
                 org.opencv.core.Rect tempRect = new org.opencv.core.Rect();
                 boolean ok = mTracker.update(mImageGrab, tempRect);
 
-                if (ok && tempRect.width > 5 && tempRect.height > 5) {
-                    trackingRectangle = tempRect.clone();  // Chỉ cập nhật nếu thành công và hợp lệ
+                if (ok && tempRect.width > 5 && tempRect.height > 5 && verifyHistogram(tempRect)) {
+                    trackingRectangle = tempRect.clone();  // Chỉ cập nhật nếu đúng vật thể
+                    mTrackingPaused = false;
                 } else {
-                    Log.d("TRACKER", "Tracking thất bại, giữ vị trí cũ.");
-                    mTrackingPaused = true;  // Đánh dấu tạm mất dấu để thử khôi phục bằng ORB
+                    Log.d("TRACKER", "Tracking thất bại hoặc sai vật thể, giữ vị trí cũ.");
+                    mTrackingPaused = true;
                 }
+
 
 
                 boolean RunORB = !ok || (frameCount % 10 == 0);
