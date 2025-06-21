@@ -165,9 +165,10 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
     private int roiSize = 70;
 
     private int frameCount = 0;
-    private Mat objectHistHue;
+    private long lastSendTime = 0;
+    private long sendInterval = 100; // ms
 
-
+    private Mat objectLBPHist;
     TextureView.SurfaceTextureListener textureListener = new TextureView.SurfaceTextureListener() {
         @Override
         public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
@@ -412,6 +413,33 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
         return cx + "," + mTrackingOverlay.getWidth() + "," + cy + "," + mTrackingOverlay.getHeight();
     }
 
+    private Mat computeLBP(Mat gray) {
+        Mat lbp = new Mat(gray.rows(), gray.cols(), CvType.CV_8UC1);
+        for (int y = 1; y < gray.rows() - 1; y++) {
+            for (int x = 1; x < gray.cols() - 1; x++) {
+                double center = gray.get(y, x)[0];
+                int code = 0;
+                code |= (gray.get(y - 1, x - 1)[0] > center ? 1 : 0) << 7;
+                code |= (gray.get(y - 1, x)[0] > center ? 1 : 0) << 6;
+                code |= (gray.get(y - 1, x + 1)[0] > center ? 1 : 0) << 5;
+                code |= (gray.get(y, x + 1)[0] > center ? 1 : 0) << 4;
+                code |= (gray.get(y + 1, x + 1)[0] > center ? 1 : 0) << 3;
+                code |= (gray.get(y + 1, x)[0] > center ? 1 : 0) << 2;
+                code |= (gray.get(y + 1, x - 1)[0] > center ? 1 : 0) << 1;
+                code |= (gray.get(y, x - 1)[0] > center ? 1 : 0);
+                lbp.put(y, x, code);
+            }
+        }
+        return lbp;
+    }
+
+    private Mat getLBPHistogram(Mat lbpImage) {
+        Mat hist = new Mat();
+        Imgproc.calcHist(Arrays.asList(lbpImage), new MatOfInt(0), new Mat(), hist, new MatOfInt(256), new MatOfFloat(0, 256));
+        Core.normalize(hist, hist, 0, 1, Core.NORM_MINMAX);
+        return hist;
+    }
+
     private void processing() {
         frameCount++;
         if (mTargetLocked) {
@@ -431,6 +459,9 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
                 objectKeypoints = new MatOfKeyPoint();
                 objectDescriptors = new Mat();
                 orb.detectAndCompute(grayInit, new Mat(), objectKeypoints, objectDescriptors);
+
+                Mat lbpInit = computeLBP(grayInit);
+                objectLBPHist = getLBPHistogram(lbpInit);
 
                 // Chọn tracker
                 if (mSelectedTracker.equals("TrackerCSRT")) {
@@ -470,6 +501,17 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
 
                         if (goodMatches.size() >= 10) {
                             Log.d("ORB_MATCH", "Tìm lại được vật thể, xac minh vat");
+
+                            // So sánh bằng LBP để xác minh chắc chắn hơn
+                            Mat lbpROI = computeLBP(grayROI);
+                            Mat lbpHistNow = getLBPHistogram(lbpROI);
+                            double lbpCompare = Imgproc.compareHist(objectLBPHist, lbpHistNow, Imgproc.CV_COMP_CORREL);
+                            if (lbpCompare < 0.1) {
+                                Log.d("LBP", "LBP khác biệt quá nhiều, từ chối khôi phục");
+                                mProcessing = false;
+                                return;
+                            }
+
                             mTrackingPaused = false;
 
                         } else {
@@ -528,9 +570,11 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
                 updateOverlayBox(trackingRectangle);
 
                 // Gửi BLE nếu đang kết nối
-                if (connected == Connected.True) {
+                long now = System.currentTimeMillis();
+                if (connected == Connected.True && (now - lastSendTime > sendInterval)) {
                     String dataBle = getBleData();
                     sendBLE(dataBle);
+                    lastSendTime = now;
                 }
             }
         } else {
