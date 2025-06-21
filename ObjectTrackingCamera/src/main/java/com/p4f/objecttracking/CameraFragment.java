@@ -172,6 +172,8 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
     private long lastSendTime = 0;
     private long sendInterval = 200; // ms
 
+    private org.opencv.core.Rect trackingRectangle = new org.opencv.core.Rect();
+
     TextureView.SurfaceTextureListener textureListener = new TextureView.SurfaceTextureListener() {
         @Override
         public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
@@ -374,6 +376,23 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
         }
     };
 
+    private Rect expandRect(Rect rect, int imageWidth, int imageHeight, double scale) {
+        int centerX = rect.x + rect.width / 2;
+        int centerY = rect.y + rect.height / 2;
+
+        int newWidth = (int)(rect.width * scale);
+        int newHeight = (int)(rect.height * scale);
+
+        int newX = centerX - newWidth / 2;
+        int newY = centerY - newHeight / 2;
+
+        Rect expanded = new Rect(newX, newY, newWidth, newHeight);
+        return adjustRectInsideImage(expanded, new Mat(imageHeight, imageWidth, CvType.CV_8UC1));  // an image Mat just for bounds
+    }
+
+
+
+
     private Rect adjustRectInsideImage(Rect rect, Mat image) {
         int x = Math.max(rect.x, 0);
         int y = Math.max(rect.y, 0);
@@ -461,7 +480,12 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
 
                 if (mTrackingPaused) {
 
-                    Rect roiRect = getRoiAround(mInitRectangle, mImageGrab);
+                    Rect roiRect = expandRect(mInitRectangle, mImageGrab.cols(), mImageGrab.rows(), 1.8);
+                    if (roiRect.width <= 1 || roiRect.height <= 1) {
+                        Log.e("ROI_ERROR", "ROI không hợp lệ trong ORB: " + roiRect.toString());
+                        mProcessing = false;
+                        return;
+                    }
                     Mat roi = new Mat(mImageGrab, roiRect);
                     Mat grayROI = new Mat();
                     Imgproc.cvtColor(roi, grayROI, Imgproc.COLOR_RGBA2GRAY);
@@ -495,7 +519,7 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
                             Core.normalize(roiHistHue, roiHistHue, 0, 1, Core.NORM_MINMAX);
 
                             double histCompare = Imgproc.compareHist(objectHistHue, roiHistHue, Imgproc.CV_COMP_CORREL);
-                            if (histCompare < 0.35) {
+                            if (histCompare < 0.3) {
                                 Log.d("HISTOGRAM", "Histogram khác biệt quá nhiều, từ chối khôi phục");
                                 mProcessing = false;
                                 return;
@@ -518,11 +542,28 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
                 }
 
                 // Tiếp tục tracking
-                org.opencv.core.Rect trackingRectangle = new org.opencv.core.Rect(0, 0, 1, 1);
-                boolean ok = mTracker.update(mImageGrab, trackingRectangle);
+                if (trackingRectangle == null)
+                    trackingRectangle = mInitRectangle.clone();  // đảm bảo không null ban đầu
+
+                org.opencv.core.Rect tempRect = new org.opencv.core.Rect();
+                boolean ok = mTracker.update(mImageGrab, tempRect);
+
+                if (ok && tempRect.width > 5 && tempRect.height > 5) {
+                    trackingRectangle = tempRect.clone();  // Chỉ cập nhật nếu thành công và hợp lệ
+                } else {
+                    Log.d("TRACKER", "Tracking thất bại, giữ vị trí cũ.");
+                    mTrackingPaused = true;  // Đánh dấu tạm mất dấu để thử khôi phục bằng ORB
+                }
+
+
                 boolean RunORB = !ok || (frameCount % 10 == 0);
                 if (RunORB) {
-                    Rect roiRect = getRoiAround(trackingRectangle, mImageGrab);
+                    Rect roiRect = expandRect(trackingRectangle, mImageGrab.cols(), mImageGrab.rows(), 1.8);
+                    if (roiRect.width <= 1 || roiRect.height <= 1) {
+                        Log.e("ROI_ERROR", "ROI không hợp lệ trong ORB: " + roiRect.toString());
+                        mProcessing = false;
+                        return;
+                    }
                     Mat grayROI = new Mat();
                     Imgproc.cvtColor(new Mat(mImageGrab, roiRect), grayROI, Imgproc.COLOR_RGBA2GRAY);
                     MatOfKeyPoint keypointsNow = new MatOfKeyPoint();
