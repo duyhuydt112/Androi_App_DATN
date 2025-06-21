@@ -523,7 +523,7 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
                             }
                         }
 
-                        if (goodMatches.size() >= 10) {
+                        if (goodMatches.size() >= 8) {
                             Log.d("ORB_MATCH", "Tìm lại được vật thể, xac minh vat");
                             Mat roiHSV = new Mat();
                             Imgproc.cvtColor(roi, roiHSV, Imgproc.COLOR_RGB2HSV);
