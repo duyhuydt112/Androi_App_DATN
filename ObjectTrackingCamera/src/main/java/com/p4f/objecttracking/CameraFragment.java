@@ -168,7 +168,9 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
     private Mat latestKeypoints = new MatOfKeyPoint();
 
     private Mat objectHistHue;
-
+    private int frameCount = 0;
+    private long lastSendTime = 0;
+    private long sendInterval = 200; // ms
 
     TextureView.SurfaceTextureListener textureListener = new TextureView.SurfaceTextureListener() {
         @Override
@@ -393,8 +395,29 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
         return new Rect(x, y, width, height);
     }
 
+    private Rect getRoiAround(Rect rect, Mat img) {
+        int cx = rect.x + rect.width / 2;
+        int cy = rect.y + rect.height / 2;
+        Rect roi = new Rect(cx - roiSize / 2, cy - roiSize / 2, roiSize, roiSize);
+        return adjustRectInsideImage(roi, img);
+    }
+
+    private void updateOverlayBox(Rect r) {
+        mPoints[0].x = r.x * mTrackingOverlay.getWidth() / mImageGrab.cols();
+        mPoints[0].y = r.y * mTrackingOverlay.getHeight() / mImageGrab.rows();
+        mPoints[1].x = mPoints[0].x + r.width * mTrackingOverlay.getWidth() / mImageGrab.cols();
+        mPoints[1].y = mPoints[0].y + r.height * mTrackingOverlay.getHeight() / mImageGrab.rows();
+        mTrackingOverlay.postInvalidate();
+    }
+
+    private String getBleData() {
+        int cx = (mPoints[0].x + mPoints[1].x) / 2;
+        int cy = (mPoints[0].y + mPoints[1].y) / 2;
+        return cx + "," + mTrackingOverlay.getWidth() + "," + cy + "," + mTrackingOverlay.getHeight();
+    }
 
     private void processing() {
+        frameCount++;
         if (mTargetLocked) {
             if (mDrawing == Drawing.DRAWING) {
                 // Lấy vùng được chọn
@@ -408,9 +431,11 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
                 mImageGrab.copyTo(mImageGrabInit);
                 Mat grayInit = new Mat();
                 Imgproc.cvtColor(mImageGrabInit, grayInit, Imgproc.COLOR_RGBA2GRAY);
+
                 objectKeypoints = new MatOfKeyPoint();
                 objectDescriptors = new Mat();
                 orb.detectAndCompute(grayInit, new Mat(), objectKeypoints, objectDescriptors);
+
                 Mat objectHSV = new Mat();
                 Imgproc.cvtColor(mImageGrabInit, objectHSV, Imgproc.COLOR_RGB2HSV);
                 List<Mat> objectChannels = new ArrayList<>();
@@ -419,6 +444,7 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
                 Imgproc.calcHist(Arrays.asList(objectChannels.get(0)), new MatOfInt(0), new Mat(),
                         objectHistHue, new MatOfInt(50), new MatOfFloat(0, 180));
                 Core.normalize(objectHistHue, objectHistHue, 0, 1, Core.NORM_MINMAX);
+
                 // Chọn tracker
                 if (mSelectedTracker.equals("TrackerCSRT")) {
                     mTracker = TrackerCSRT.create();
@@ -434,15 +460,12 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
             } else {
 
                 if (mTrackingPaused) {
-                    // THỬ KHÔI PHỤC KHI ĐANG TẠM DỪNG
-                    int centerX = mInitRectangle.x + mInitRectangle.width / 2;
-                    int centerY = mInitRectangle.y + mInitRectangle.height / 2;
 
-                    Rect roiRect = new Rect(centerX - roiSize / 2, centerY - roiSize / 2, roiSize, roiSize);
-                    roiRect = adjustRectInsideImage(roiRect, mImageGrab);
+                    Rect roiRect = getRoiAround(mInitRectangle, mImageGrab);
                     Mat roi = new Mat(mImageGrab, roiRect);
                     Mat grayROI = new Mat();
                     Imgproc.cvtColor(roi, grayROI, Imgproc.COLOR_RGBA2GRAY);
+
                     MatOfKeyPoint keypointsNow = new MatOfKeyPoint();
                     Mat descriptorsNow = new Mat();
                     orb.detectAndCompute(grayROI, new Mat(), keypointsNow, descriptorsNow);
@@ -497,43 +520,38 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
                 // Tiếp tục tracking
                 org.opencv.core.Rect trackingRectangle = new org.opencv.core.Rect(0, 0, 1, 1);
                 boolean ok = mTracker.update(mImageGrab, trackingRectangle);
-                if (!ok) {
-                    Log.d("TRACKER", "Tracker mất dấu");
-                }
+                boolean RunORB = !ok || (frameCount % 10 == 0);
+                if (RunORB) {
+                    Rect roiRect = getRoiAround(trackingRectangle, mImageGrab);
+                    Mat grayROI = new Mat();
+                    Imgproc.cvtColor(new Mat(mImageGrab, roiRect), grayROI, Imgproc.COLOR_RGBA2GRAY);
+                    MatOfKeyPoint keypointsNow = new MatOfKeyPoint();
+                    Mat descriptorsNow = new Mat();
+                    orb.detectAndCompute(grayROI, new Mat(), keypointsNow, descriptorsNow);
 
-                // ORB kiểm tra có đủ khớp không
-                int centerX = trackingRectangle.x + trackingRectangle.width / 2;
-                int centerY = trackingRectangle.y + trackingRectangle.height / 2;
+                    if (!descriptorsNow.empty() && !objectDescriptors.empty()) {
+                        List<MatOfDMatch> knnMatches = new ArrayList<>();
+                        matcher.knnMatch(objectDescriptors, descriptorsNow, knnMatches, 2);
 
-                Rect roiRect = new Rect(centerX - roiSize / 2, centerY - roiSize / 2, roiSize, roiSize);
-                roiRect = adjustRectInsideImage(roiRect, mImageGrab);
-                Mat roi = new Mat(mImageGrab, roiRect);
-                Mat grayROI = new Mat();
-                Imgproc.cvtColor(roi, grayROI, Imgproc.COLOR_RGBA2GRAY);
-                MatOfKeyPoint keypointsNow = new MatOfKeyPoint();
-                Mat descriptorsNow = new Mat();
-                orb.detectAndCompute(grayROI, new Mat(), keypointsNow, descriptorsNow);
+                        float ratioThresh = 0.75f;
+                        List<DMatch> goodMatches = new ArrayList<>();
+                        for (MatOfDMatch matOfDMatch : knnMatches) {
+                            DMatch[] matches = matOfDMatch.toArray();
+                            if (matches.length >= 2 && matches[0].distance < ratioThresh * matches[1].distance) {
+                                goodMatches.add(matches[0]);
+                            }
+                        }
 
-                if (!descriptorsNow.empty() && !objectDescriptors.empty()) {
-                    List<MatOfDMatch> knnMatches = new ArrayList<>();
-                    matcher.knnMatch(objectDescriptors, descriptorsNow, knnMatches, 2);
-
-                    float ratioThresh = 0.75f;
-                    List<DMatch> goodMatches = new ArrayList<>();
-                    for (MatOfDMatch matOfDMatch : knnMatches) {
-                        DMatch[] matches = matOfDMatch.toArray();
-                        if (matches.length >= 2 && matches[0].distance < ratioThresh * matches[1].distance) {
-                            goodMatches.add(matches[0]);
+                        if (goodMatches.size() < 5) {
+                            Log.d("ORB_MATCH", "Tạm mất dấu, sẽ thử lại ở frame tiếp theo");
+                            mTrackingPaused = true;
+                            mProcessing = false;
+                            return;
                         }
                     }
-
-                    if (goodMatches.size() < 5) {
-                        Log.d("ORB_MATCH", "Tạm mất dấu, sẽ thử lại ở frame tiếp theo");
-                        mTrackingPaused = true;
-                        mProcessing = false;
-                        return;
-                    }
                 }
+
+
 
                 // Cập nhật bounding box vào overlay
                 mPoints[0].x = (int)(trackingRectangle.x * (float)mTrackingOverlay.getWidth() / (float)mImageGrab.cols());
@@ -544,12 +562,11 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
                 mTrackingOverlay.postInvalidate();
 
                 // Gửi BLE nếu đang kết nối
-                if (connected == Connected.True) {
-                    String dataBle = Integer.toString((mPoints[0].x + mPoints[1].x) / 2) + "," +
-                            Integer.toString(mTrackingOverlay.getWidth()) + "," +
-                            Integer.toString((mPoints[0].y + mPoints[1].y) / 2) + "," +
-                            Integer.toString(mTrackingOverlay.getHeight());
+                long now = System.currentTimeMillis();
+                if (connected == Connected.True && (now - lastSendTime > sendInterval)) {
+                    String dataBle = getBleData();
                     sendBLE(dataBle);
+                    lastSendTime = now;
                 }
             }
         } else {
