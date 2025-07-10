@@ -19,6 +19,8 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import androidx.annotation.NonNull;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
 import androidx.fragment.app.ListFragment;
 import android.view.Menu;
@@ -81,12 +83,25 @@ public class DevicesFragment extends ListFragment {
         discoveryIntentFilter.addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED);
     }
 
+    private void enableBluetooth() {
+        if (bluetoothAdapter != null && !bluetoothAdapter.isEnabled()) {
+            Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
+            startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT);
+        }
+    }
+
+
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setHasOptionsMenu(true);
-        if(getActivity().getPackageManager().hasSystemFeature(PackageManager.FEATURE_BLUETOOTH))
+
+        if (getActivity().getPackageManager().hasSystemFeature(PackageManager.FEATURE_BLUETOOTH)) {
             bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
+        }
+
+        // Gán listAdapter (không thay đổi)
         listAdapter = new ArrayAdapter<BluetoothDevice>(getActivity(), 0, listItems) {
             @Override
             public View getView(int position, View view, ViewGroup parent) {
@@ -95,25 +110,44 @@ public class DevicesFragment extends ListFragment {
                     view = getActivity().getLayoutInflater().inflate(R.layout.device_list_item, parent, false);
                 TextView text1 = view.findViewById(R.id.text1);
                 TextView text2 = view.findViewById(R.id.text2);
-                if(device.getName() == null || device.getName().isEmpty())
+
+                if (device.getName() == null || device.getName().isEmpty())
                     text1.setText("<unnamed>");
                 else
                     text1.setText(device.getName());
+
                 text1.setTextColor(mBkpTxtColor);
-                if(mSelectedDeviceAddress.equals(device.getAddress()) != false){
-                    String txt = text1.getText().toString()+ "==> Selected ";
+
+                if (mSelectedDeviceAddress.equals(device.getAddress())) {
+                    String txt = text1.getText().toString() + " ==> Selected";
                     text1.setText(txt);
                     text1.setTextColor(Color.GREEN);
-                    mSelectedDevicePos = position+1 ;
+                    mSelectedDevicePos = position + 1;
                 }
+
                 text2.setText(device.getAddress());
                 return view;
             }
         };
-        Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
-        startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT);
+
+        // 👉 Chỉ gọi enable Bluetooth nếu có quyền
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.BLUETOOTH_CONNECT)
+                    != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(getActivity(),
+                        new String[]{Manifest.permission.BLUETOOTH_CONNECT},
+                        1001);
+            } else {
+                enableBluetooth();
+            }
+        } else {
+            // Android dưới 12 thì không cần xin permission này
+            enableBluetooth();
+        }
+
         mSelectedDeviceAddress = getArguments().getString("device");
     }
+
 
     @Override
     public void onActivityCreated(Bundle savedInstanceState) {
@@ -240,23 +274,49 @@ public class DevicesFragment extends ListFragment {
                 }
             }.execute(); // start async to prevent blocking UI, because startLeScan sometimes take some seconds
         } else {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.BLUETOOTH_SCAN)
+                        != PackageManager.PERMISSION_GRANTED) {
+                    ActivityCompat.requestPermissions(getActivity(),
+                            new String[]{Manifest.permission.BLUETOOTH_SCAN},
+                            1010);
+                    scanState = ScanState.NONE;
+                    return;
+                }
+            }
             bluetoothAdapter.startDiscovery();
+
         }
     }
 
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
-        // ignore requestCode as there is only one in this fragment
-        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            new Handler(Looper.getMainLooper()).postDelayed(this::startScan,1); // run after onResume to avoid wrong empty-text
-        } else {
+        if (grantResults.length == 0 || grantResults[0] != PackageManager.PERMISSION_GRANTED) {
+            // Nếu bị từ chối, hiện dialog cảnh báo
             AlertDialog.Builder builder = new AlertDialog.Builder(getActivity());
             builder.setTitle(getText(R.string.location_denied_title));
             builder.setMessage(getText(R.string.location_denied_message));
             builder.setPositiveButton(android.R.string.ok, null);
             builder.show();
+            return;
+        }
+
+        switch (requestCode) {
+            case 1001:  // BLUETOOTH_CONNECT
+                enableBluetooth();
+                break;
+
+            case 0:  // ACCESS_COARSE_LOCATION
+                new Handler(Looper.getMainLooper()).postDelayed(this::startScan, 1);
+                break;
+
+            case 1010:  // BLUETOOTH_SCAN
+                startScan();  // Gọi lại scan sau khi được cấp quyền
+                break;
         }
     }
+
+
 
     private void updateScan(BluetoothDevice device) {
         if(scanState == ScanState.NONE)
