@@ -4,9 +4,6 @@
     xmlns:tools="http://schemas.android.com/tools"
     tools:context="com.p4f.objecttracking.MainActivity">
 
-    <item  android:id="@+id/item1"
-        android:title="Setup"/>
-
     <!-- icon tùy chọn cho nút Camera -->
     <item
         android:id="@+id/action_camera"

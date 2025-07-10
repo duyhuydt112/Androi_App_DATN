@@ -429,6 +429,11 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
     private String getBleData() {
         int cx = (mPoints[0].x + mPoints[1].x) / 2;
         int cy = (mPoints[0].y + mPoints[1].y) / 2;
+        String qText = String.format(
+                "Center:\nCx: %.4f\nCy: %.4f\nW: %.4f\nH: %.4f",
+                cx, cy, mTrackingOverlay.getWidth(), mTrackingOverlay.getHeight()
+        );
+        Log.d(TAG, qText);
         return cx + "," + mTrackingOverlay.getWidth() + "," + cy + "," + mTrackingOverlay.getHeight();
     }
 

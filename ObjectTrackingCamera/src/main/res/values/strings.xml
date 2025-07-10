@@ -6,6 +6,7 @@
     <string name="ble_setup">Bluetooth Setup</string>
     <string name="camera_coordinate">Show Coordinate</string>
     <string name="tracker_type">Tracker Selection</string>
+    <string name="Open_Camera">Open Camera</string>
     <string name="ble_status">BLE not connect</string>
     <string name="camera_permission_title">Camera permission required</string>
     <string name="camera_permission_message">This app uses camera only for object tracking and sent the object location to your BLE connected device, the information from your camera is not sent or collected anywhere else</string>
