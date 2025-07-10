@@ -6,6 +6,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothSocket;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -23,6 +24,8 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
 import androidx.fragment.app.ListFragment;
+
+import android.util.Log;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
@@ -31,9 +34,14 @@ import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.ListView;
 import android.widget.TextView;
+import android.widget.Toast;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.UUID;
 
 /**
  * show list of BLE devices
@@ -50,6 +58,12 @@ public class DevicesFragment extends ListFragment {
 
     private Menu                            menu;
     private BluetoothAdapter                bluetoothAdapter;
+
+    public static BluetoothSocket socket = null;
+    public static OutputStream outputStream = null;
+    public static boolean isConnected = false;
+
+
     private ArrayList<BluetoothDevice>      listItems = new ArrayList<>();
     private ArrayAdapter<BluetoothDevice>   listAdapter;
     private int mSelectedDevicePos = -1;
@@ -68,7 +82,7 @@ public class DevicesFragment extends ListFragment {
             public void onReceive(Context context, Intent intent) {
                 if(intent.getAction().equals(BluetoothDevice.ACTION_FOUND)) {
                     BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
-                    if(device.getType() != BluetoothDevice.DEVICE_TYPE_CLASSIC && getActivity() != null) {
+                    if(device != null&& getActivity() != null) {
                         getActivity().runOnUiThread(() -> updateScan(device));
                     }
                 }
@@ -226,68 +240,73 @@ public class DevicesFragment extends ListFragment {
         }
     }
 
-    @SuppressLint("StaticFieldLeak") // AsyncTask needs reference to this fragment
+    @SuppressLint("MissingPermission")
     private void startScan() {
-        if(scanState != ScanState.NONE)
+        if (scanState != ScanState.NONE)
             return;
-        scanState = ScanState.LESCAN;
+
+        // 👉 Bắt buộc dùng DISCOVERY vì ESP32 dùng Bluetooth Classic (SPP)
+        scanState = ScanState.DISCOVERY;
+
+        // Kiểm tra quyền location (bắt buộc từ Android 6.0 trở lên)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (getActivity().checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.ACCESS_FINE_LOCATION)
+                    != PackageManager.PERMISSION_GRANTED) {
                 scanState = ScanState.NONE;
-                AlertDialog.Builder builder = new AlertDialog.Builder(getActivity());
-                builder.setTitle(R.string.location_permission_title);
-                builder.setMessage(R.string.location_permission_message);
-                builder.setPositiveButton(android.R.string.ok,
-                        (dialog, which) -> requestPermissions(new String[]{Manifest.permission.ACCESS_COARSE_LOCATION}, 0));
-                builder.show();
+                new AlertDialog.Builder(getActivity())
+                        .setTitle("Location Permission Needed")
+                        .setMessage("Location permission is needed to scan for Bluetooth devices.")
+                        .setPositiveButton(android.R.string.ok,
+                                (dialog, which) -> requestPermissions(
+                                        new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, 0))
+                        .show();
                 return;
             }
+
+            // Kiểm tra GPS đã bật chưa
             LocationManager locationManager = (LocationManager) getActivity().getSystemService(Context.LOCATION_SERVICE);
-            boolean         locationEnabled = false;
+            boolean locationEnabled = false;
             try {
-                locationEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER);
-            } catch(Exception ignored) {}
-            try {
-                locationEnabled |= locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
-            } catch(Exception ignored) {}
-            if(!locationEnabled)
-                scanState = ScanState.DISCOVERY;
-            // Starting with Android 6.0 a bluetooth scan requires ACCESS_COARSE_LOCATION permission, but that's not all!
-            // LESCAN also needs enabled 'location services', whereas DISCOVERY works without.
-            // Most users think of GPS as 'location service', but it includes more, as we see here.
-            // Instead of asking the user to enable something they consider unrelated,
-            // we fall back to the older API that scans for bluetooth classic _and_ LE
-            // sometimes the older API returns less results or slower
+                locationEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                        locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
+            } catch (Exception ignored) {}
+
+            if (!locationEnabled) {
+                new AlertDialog.Builder(getActivity())
+                        .setTitle("Location Required")
+                        .setMessage("Please enable Location Services (GPS or Network) to scan for Bluetooth devices.")
+                        .setPositiveButton("OK", null)
+                        .show();
+                scanState = ScanState.NONE;
+                return;
+            }
         }
+
+        // 👉 Kiểm tra quyền BLUETOOTH_SCAN với Android 12+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.BLUETOOTH_SCAN)
+                    != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(getActivity(),
+                        new String[]{Manifest.permission.BLUETOOTH_SCAN}, 1010);
+                scanState = ScanState.NONE;
+                return;
+            }
+        }
+
+        // ✅ Bắt đầu quét
         listItems.clear();
         listAdapter.notifyDataSetChanged();
         setEmptyText("<scanning...>");
         menu.findItem(R.id.ble_scan).setVisible(false);
         menu.findItem(R.id.ble_scan_stop).setVisible(true);
-        if(scanState == ScanState.LESCAN) {
-            leScanStopHandler.postDelayed(this::stopScan, LESCAN_PERIOD);
-            new AsyncTask<Void, Void, Void>() {
-                @Override
-                protected Void doInBackground(Void[] params) {
-                    bluetoothAdapter.startLeScan(null, leScanCallback);
-                    return null;
-                }
-            }.execute(); // start async to prevent blocking UI, because startLeScan sometimes take some seconds
-        } else {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.BLUETOOTH_SCAN)
-                        != PackageManager.PERMISSION_GRANTED) {
-                    ActivityCompat.requestPermissions(getActivity(),
-                            new String[]{Manifest.permission.BLUETOOTH_SCAN},
-                            1010);
-                    scanState = ScanState.NONE;
-                    return;
-                }
-            }
-            bluetoothAdapter.startDiscovery();
 
+        boolean started = bluetoothAdapter.startDiscovery();
+        if (!started) {
+            scanState = ScanState.NONE;
+            setEmptyText("<scan failed to start>");
         }
     }
+
 
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
@@ -356,6 +375,14 @@ public class DevicesFragment extends ListFragment {
         stopScan();
         BluetoothDevice device = listItems.get(position-1);
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                ContextCompat.checkSelfPermission(getContext(), Manifest.permission.BLUETOOTH_CONNECT)
+                        != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(getActivity(),
+                    new String[]{Manifest.permission.BLUETOOTH_CONNECT}, 1001);
+            return;
+        }
+
         TextView tv = (TextView) v.findViewById(R.id.text1);
         String txt = tv.getText().toString();
         txt = device.getName() + "==> Selected ";
@@ -381,6 +408,7 @@ public class DevicesFragment extends ListFragment {
         );
 
         mSelectedDeviceAddress = device.getAddress();
+        connectToDevice(device.getAddress());
 
 //        Bundle args = new Bundle();
 //        args.putString("device", device.getAddress());
@@ -393,6 +421,8 @@ public class DevicesFragment extends ListFragment {
      * sort by name, then address. sort named devices first
      */
     static int compareTo(BluetoothDevice a, BluetoothDevice b) {
+
+
         boolean aValid = a.getName()!=null && !a.getName().isEmpty();
         boolean bValid = b.getName()!=null && !b.getName().isEmpty();
         if(aValid && bValid) {
@@ -404,4 +434,46 @@ public class DevicesFragment extends ListFragment {
         if(bValid) return +1;
         return a.getAddress().compareTo(b.getAddress());
     }
+
+    private void connectToDevice(String address) {
+        new Thread(() -> {
+            try {
+                BluetoothDevice device = bluetoothAdapter.getRemoteDevice(address);
+                UUID sppUUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
+
+                if (bluetoothAdapter.isDiscovering()) {
+                    bluetoothAdapter.cancelDiscovery();
+                }
+
+                socket = device.createRfcommSocketToServiceRecord(sppUUID);
+                socket.connect(); // Blocking
+
+                outputStream = socket.getOutputStream();
+                InputStream inputStream = socket.getInputStream(); // Nếu cần đọc sau này
+
+                isConnected = true;
+
+                requireActivity().runOnUiThread(() ->
+                        Toast.makeText(requireContext(), "Kết nối thành công", Toast.LENGTH_SHORT).show()
+                );
+
+            } catch (IOException e) {
+                Log.e("BT_CONNECT", "Lỗi kết nối: " + e.getMessage());
+                isConnected = false;
+
+                requireActivity().runOnUiThread(() ->
+                        Toast.makeText(requireContext(), "Không thể kết nối Bluetooth", Toast.LENGTH_SHORT).show()
+                );
+
+                try {
+                    if (socket != null) socket.close();
+                } catch (IOException closeEx) {
+                    Log.e("BT_CONNECT", "Lỗi đóng socket: " + closeEx.getMessage());
+                }
+            }
+        }).start();
+    }
+
+
+
 }

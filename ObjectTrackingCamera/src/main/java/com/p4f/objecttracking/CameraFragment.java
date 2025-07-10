@@ -88,6 +88,7 @@ import org.opencv.tracking.TrackerKCF;
 import org.opencv.video.Tracker;
 
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -430,7 +431,7 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
         int cx = (mPoints[0].x + mPoints[1].x) / 2;
         int cy = (mPoints[0].y + mPoints[1].y) / 2;
         String qText = String.format(
-                "Center:\nCx: %.4f\nCy: %.4f\nW: %.4f\nH: %.4f",
+                "Center:\nCx: %d\nCy: %d\nW: %d\nH: %d",
                 cx, cy, mTrackingOverlay.getWidth(), mTrackingOverlay.getHeight()
         );
         Log.d(TAG, qText);
@@ -627,7 +628,7 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
 
                 // Gửi BLE nếu đang kết nối
                 long now = System.currentTimeMillis();
-                if (connected == Connected.True && (now - lastSendTime > sendInterval)) {
+                if (DevicesFragment.isConnected  && (now - lastSendTime > 1)) {
                     String dataBle = getBleData();
                     sendBLE(dataBle);
                     lastSendTime = now;
@@ -887,17 +888,23 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
     }
 
     private void sendBLE(String str) {
-        if(connected != Connected.True) {
-            Toast.makeText(getActivity(), "not connected", Toast.LENGTH_SHORT).show();
+        if (!DevicesFragment.isConnected || DevicesFragment.outputStream == null) {
+            Toast.makeText(getContext(), "Chưa kết nối thiết bị", Toast.LENGTH_SHORT).show();
             return;
         }
-        try {
-            byte[] data = (str + newline).getBytes();
-            socket.write(data);
-        } catch (Exception e) {
-            onSerialIoError(e);
-        }
+
+        new Thread(() -> {
+            try {
+                DevicesFragment.outputStream.write((str + "\n").getBytes());
+            } catch (IOException e) {
+                Log.e("BT_SEND", "Lỗi khi gửi dữ liệu: " + e.getMessage());
+                requireActivity().runOnUiThread(() ->
+                        Toast.makeText(requireContext(), "Lỗi khi gửi dữ liệu", Toast.LENGTH_SHORT).show()
+                );
+            }
+        }).start();
     }
+
 
 
     @Override
