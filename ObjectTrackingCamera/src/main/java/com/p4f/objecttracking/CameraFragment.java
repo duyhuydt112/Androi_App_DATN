@@ -430,11 +430,7 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
     private String getBleData() {
         int cx = (mPoints[0].x + mPoints[1].x) / 2;
         int cy = (mPoints[0].y + mPoints[1].y) / 2;
-        String qText = String.format(
-                "Center:\nCx: %d\nCy: %d\nW: %d\nH: %d",
-                cx, cy, mTrackingOverlay.getWidth(), mTrackingOverlay.getHeight()
-        );
-        Log.d(TAG, qText);
+
         return cx + "," + mTrackingOverlay.getWidth() + "," + cy + "," + mTrackingOverlay.getHeight();
     }
 
@@ -628,7 +624,7 @@ public class CameraFragment extends Fragment implements ServiceConnection, Seria
 
                 // Gửi BLE nếu đang kết nối
                 long now = System.currentTimeMillis();
-                if (DevicesFragment.isConnected  && (now - lastSendTime > 1)) {
+                if (DevicesFragment.isConnected && !mTrackingPaused && ok &&(now - lastSendTime > 50)) {
                     String dataBle = getBleData();
                     sendBLE(dataBle);
                     lastSendTime = now;

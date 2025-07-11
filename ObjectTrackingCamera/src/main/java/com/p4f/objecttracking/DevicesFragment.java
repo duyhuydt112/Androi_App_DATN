@@ -449,21 +449,27 @@ public class DevicesFragment extends ListFragment {
                 socket.connect(); // Blocking
 
                 outputStream = socket.getOutputStream();
-                InputStream inputStream = socket.getInputStream(); // Nếu cần đọc sau này
+                InputStream inputStream = socket.getInputStream(); // nếu cần sau này
 
                 isConnected = true;
 
-                requireActivity().runOnUiThread(() ->
-                        Toast.makeText(requireContext(), "Kết nối thành công", Toast.LENGTH_SHORT).show()
-                );
+                Activity activity = getActivity();
+                if (activity != null) {
+                    activity.runOnUiThread(() ->
+                            Toast.makeText(activity, "Kết nối thành công", Toast.LENGTH_SHORT).show()
+                    );
+                }
 
             } catch (IOException e) {
                 Log.e("BT_CONNECT", "Lỗi kết nối: " + e.getMessage());
                 isConnected = false;
 
-                requireActivity().runOnUiThread(() ->
-                        Toast.makeText(requireContext(), "Không thể kết nối Bluetooth", Toast.LENGTH_SHORT).show()
-                );
+                Activity activity = getActivity();
+                if (activity != null) {
+                    activity.runOnUiThread(() ->
+                            Toast.makeText(activity, "Không thể kết nối Bluetooth", Toast.LENGTH_SHORT).show()
+                    );
+                }
 
                 try {
                     if (socket != null) socket.close();
