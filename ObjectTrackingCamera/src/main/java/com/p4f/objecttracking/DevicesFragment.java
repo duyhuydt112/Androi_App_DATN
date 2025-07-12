@@ -125,11 +125,22 @@ public class DevicesFragment extends ListFragment {
                 TextView text1 = view.findViewById(R.id.text1);
                 TextView text2 = view.findViewById(R.id.text2);
 
-                if (device.getName() == null || device.getName().isEmpty())
-                    text1.setText("<unnamed>");
-                else
-                    text1.setText(device.getName());
+                String deviceName = "<unnamed>";
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.BLUETOOTH_CONNECT)
+                            == PackageManager.PERMISSION_GRANTED) {
+                        if (device.getName() != null && !device.getName().isEmpty()) {
+                            deviceName = device.getName();
+                        }
+                    }
+                } else {
+                    // Với Android < 12 không cần quyền
+                    if (device.getName() != null && !device.getName().isEmpty()) {
+                        deviceName = device.getName();
+                    }
+                }
 
+                text1.setText(deviceName);
                 text1.setTextColor(mBkpTxtColor);
 
                 if (mSelectedDeviceAddress.equals(device.getAddress())) {
@@ -143,7 +154,6 @@ public class DevicesFragment extends ListFragment {
                 return view;
             }
         };
-
         // 👉 Chỉ gọi enable Bluetooth nếu có quyền
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.BLUETOOTH_CONNECT)
